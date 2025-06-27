@@ -50,7 +50,7 @@ LPF = np.zeros(hologram.shape)  # Low pass filter
 # angular spectrum method
 def compute_ASM_parameter():
     f = 1 / (1 / d + 1 / d2)  # lens responsible for imaging an object kept at d distance to an image at d2 distance
-    L = ne.evaluate("exp(1j * p / (f * wavelength) * (x * x + y * y))")
+    L = ne.evaluate("exp(1j * p / (f * wavelength) * (x * x + y * y))") 
     alpha_squared = ne.evaluate("k_squared - four_pi_squared * (fx*fx + fy*fy)")
     alpha = np.sqrt(np.maximum(alpha_squared, 0))  # Ensure non-negative values for sqrt
     G = ne.evaluate("exp(-1j * alpha * d2)")
