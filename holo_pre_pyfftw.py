@@ -8,10 +8,10 @@ import time
 from pyfftw.interfaces.numpy_fft import fft2, ifft2, fftshift
 import numexpr as ne
 
-if not os.path.exists(r"D:\To-Do-Things\DigitalHolography_using _angular_spectrum\ulf7.BMP"):
+if not os.path.exists(r"ulf7.BMP"):
     raise FileNotFoundError("The file 'ulf7.BMP' was not found.")
 
-hologram = mpi.imread(r"D:\To-Do-Things\DigitalHolography_using _angular_spectrum\ulf7.BMP")
+hologram = mpi.imread(r"ulf7.BMP")
 hologram = hologram.astype(float)
 plt.figure(1)
 plt.title("Hologram")

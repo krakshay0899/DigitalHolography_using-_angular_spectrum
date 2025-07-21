@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hologram Reconstruction Web App</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Hologram Reconstruction using Angular Spectrum</h1>
+
+        <div class="control-panel">
+            <div class="button-group">
+                <input type="file" id="hologramFile" accept=".bmp,.png,.jpg,.jpeg,.tif,.tiff" style="display: none;">
+                <button id="loadHologramBtn" class="btn primary">Load Hologram Image</button>
+                <button id="reconstructBtn" class="btn primary">Reconstruct Hologram</button>
+            </div>
+
+            <div class="distance-control">
+                <label for="reconstructionDistance">Reconstruction Distance (m):</label>
+                <input type="text" id="reconstructionDistance" value="0.000" step="0.001" pattern="[-+]?[0-9]*\.?[0-9]+" title="Enter a number (e.g., 0.5, -0.2)">
+                <input type="range" id="distanceSlider" min="-1000" max="1000" value="0">
+            </div>
+
+            <div class="time-info">
+                <p>Hologram Dimension: <span id="dimensionLabel">N/A</span></p>
+                <p>Total Reconstruction Time: <span id="totalTimeLabel">N/A</span></p>
+                <p>Propagation Time: <span id="propagationTimeLabel">N/A</span></p>
+            </div>
+        </div>
+
+        <div class="display-area">
+            <div id="initialMessage" class="initial-message">
+                {{ initial_message }}
+            </div>
+            <img id="hologramDisplay" src="" alt="Hologram Image" class="hologram-image" style="display: none;">
+        </div>
+
+        <div id="loadingSpinner" class="spinner" style="display: none;"></div>
+        <div id="errorMessage" class="error-message" style="display: none;"></div>
+    </div>
+
+    <script>
+        const loadHologramBtn = document.getElementById('loadHologramBtn');
+        const hologramFile = document.getElementById('hologramFile');
+        const reconstructBtn = document.getElementById('reconstructBtn');
+        const reconstructionDistanceInput = document.getElementById('reconstructionDistance');
+        const distanceSlider = document.getElementById('distanceSlider');
+        const hologramDisplay = document.getElementById('hologramDisplay');
+        const initialMessage = document.getElementById('initialMessage');
+        const totalTimeLabel = document.getElementById('totalTimeLabel');
+        const propagationTimeLabel = document.getElementById('propagationTimeLabel');
+        const dimensionLabel = document.getElementById('dimensionLabel');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+        const errorMessageDiv = document.getElementById('errorMessage');
+
+        loadHologramBtn.addEventListener('click', () => {
+            hologramFile.click();
+        });
+
+        hologramFile.addEventListener('change', async () => {
+            const file = hologramFile.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('hologram_file', file);
+
+            showLoading();
+            errorMessageDiv.style.display = 'none';
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    initialMessage.style.display = 'none';
+                    hologramDisplay.src = `data:image/png;base64,${data.preview_image}`;
+                    hologramDisplay.style.display = 'block';
+                    dimensionLabel.textContent = data.dimension;
+                    totalTimeLabel.textContent = 'N/A';
+                    propagationTimeLabel.textContent = 'N/A';
+                    alert(data.message);
+                } else {
+                    showError(data.error);
+                }
+            } catch (error) {
+                showError('An error occurred during file upload: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        });
+
+        reconstructBtn.addEventListener('click', async () => {
+            const distance = reconstructionDistanceInput.value;
+            if (!distance) {
+                showError('Please enter a reconstruction distance.');
+                return;
+            }
+
+            showLoading();
+            errorMessageDiv.style.display = 'none';
+
+            try {
+                const response = await fetch('/reconstruct', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `distance=${distance}`
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    initialMessage.style.display = 'none';
+                    hologramDisplay.src = `data:image/png;base64,${data.reconstructed_image}`;
+                    hologramDisplay.style.display = 'block';
+                    totalTimeLabel.textContent = data.total_time;
+                    propagationTimeLabel.textContent = data.propagation_time;
+                } else {
+                    showError(data.error);
+                }
+            } catch (error) {
+                showError('An error occurred during reconstruction: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        });
+
+        reconstructionDistanceInput.addEventListener('input', () => {
+            try {
+                let value = parseFloat(reconstructionDistanceInput.value);
+                if (isNaN(value)) {
+                    value = 0; // Default to 0 if not a number
+                }
+                const sliderValue = Math.round(value * 1000);
+                distanceSlider.value = Math.min(Math.max(sliderValue, -1000), 1000);
+            } catch (e) {
+                // Do nothing if input is incomplete or invalid during typing
+            }
+        });
+
+        distanceSlider.addEventListener('input', () => {
+            const value = distanceSlider.value / 1000.0;
+            reconstructionDistanceInput.value = value.toFixed(3);
+            // Automatically trigger reconstruction on slider change (like in PyQt)
+            reconstructBtn.click();
+        });
+
+        function showLoading() {
+            loadingSpinner.style.display = 'block';
+            reconstructBtn.disabled = true;
+            loadHologramBtn.disabled = true;
+        }
+
+        function hideLoading() {
+            loadingSpinner.style.display = 'none';
+            reconstructBtn.disabled = false;
+            loadHologramBtn.disabled = false;
+        }
+
+        function showError(message) {
+            errorMessageDiv.textContent = message;
+            errorMessageDiv.style.display = 'block';
+        }
+
+        // Initialize slider and input
+        reconstructionDistanceInput.value = (distanceSlider.value / 1000.0).toFixed(3);
+    </script>
+</body>
+</html>

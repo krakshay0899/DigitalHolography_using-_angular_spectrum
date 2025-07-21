@@ -3,10 +3,8 @@ from numpy.fft import fft2, ifft2, fftshift, ifftshift
 import matplotlib.pyplot as plt
 import cv2
 
-img1 = cv2.imread('iitd.jpg', 0)
-img2= cv2.imread('bios.jpg', 0)
-# img1=np.abs(255-img1)
-# img2=np.abs(255-img2)
+img1 = cv2.imread('bios.jpg', 0)
+img2= cv2.imread('iitd.jpg', 0)
 u1 = img1.astype(np.float32)
 u2= img2.astype(np.float32)
 
@@ -27,10 +25,10 @@ u2 = img_padding(u2)[0]
 
 wavelength = 632.8e-9  # 633 nm
 dx = 6.8e-6  # 10 microns
-theta= .043  # angle of propagation
+theta= 0.04  # angle of propagation
 prop_dist= .1  # Propagation distance in meters
 recon_dist = .1 # Reconstruction distance in meters
-del_z=0.1  
+del_z=.1  
 # m=1
 # d2=prop_dist*m
 # f = 1 / (1 / prop_dist + 1 / d2)
@@ -70,37 +68,39 @@ plt.title('Phase')  # Display the propagated field
 
 x = x[pad_y:-pad_y, pad_x:-pad_x]
 y = y[pad_y:-pad_y, pad_x:-pad_x]
-# L=np.exp(1j * p / (f * wavelength) * (x * x + y * y))
-R =np.exp((2j * np.pi *np.sin(theta)*x)/(wavelength))
+L=np.exp(1j * np.pi / ((prop_dist/2) * wavelength) * (x * x + y * y))
+# R = np.exp(1j * k* np.sqrt((x)**2 + (y-0.09)**2 + (1)**2)) / np.sqrt(x**2 + (y-0.09)**2 + (1)**2)
+R=np.exp(1j*k*np.sin(theta*x))
 R = R / np.max(np.abs(R))  # Normalize reference wave
 hologram = np.abs(uz + R)**2  # Hologram generation
-h=fftshift(fft2(ifftshift(hologram)))  
+h=fftshift(fft2(ifftshift(hologram)))
+h[int(h.shape[0]//2), int(h.shape[1]//2)] = 0  # Set central pixel to 0
 plt.figure(2)
 plt.subplot(1, 2, 1)
 plt.imshow(np.abs(hologram), cmap='gray')
 plt.title('Magnitude')
 plt.colorbar()
 plt.subplot(1, 2, 2)
-plt.imshow(np.imag(hologram), cmap='gray')
-plt.title('Phase')
+plt.imshow(np.abs(h), cmap='gray')
+plt.title('FFT of Hologram')
 plt.colorbar()  # Display the hologram
 cv2.imwrite('hologram.bmp', (255 * (hologram - np.min(hologram)) / (np.max(hologram) - np.min(hologram))).astype(np.uint8))
 # Reconstruct image from hologram
 def reconstruct_from_hologram(hologram,recon_dist):
     hologram = hologram -np.mean(hologram)  # DC suppression
-    reconstructed = hologram*np.exp((-2j * np.pi *np.sin(theta)*x)/(wavelength)) # Multiply hologram with conjugate of reference wave
+    reconstructed = hologram*np.conj(R) # Multiply hologram with conjugate of reference wave
     reconstructed = np.pad(reconstructed, ((pad_y, pad_y), (pad_x, pad_x)), constant_values=0)
     recon_field = angular_spectrum_propagation(reconstructed, recon_dist)
     return recon_field
 
 
 recon_field = reconstruct_from_hologram(hologram, 0.1)
-recon_field2=reconstruct_from_hologram(hologram, 0.2)  # Reconstruct the field from hologram
+recon_field2=reconstruct_from_hologram(hologram, -0.2)  # Reconstruct the field from hologram
 plt.figure(3)
 plt.subplot(1, 2, 1)
 plt.imshow(np.abs(recon_field)**2, cmap='gray')
-plt.title('Reconstructed Magnitude')
+plt.title('Reconstructed Magnitude at d1')
 plt.subplot(1, 2, 2)
 plt.imshow(np.abs(recon_field2), cmap='gray')
-plt.title('Reconstructed Phase')
+plt.title('Reconstructed Magnitude at d2')
 plt.show()
