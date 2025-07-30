@@ -5,6 +5,7 @@ import pyfftw
 from PyQt5.QtGui import QDoubleValidator, QImage, QPixmap, QPainter, QPen, QConicalGradient
 import numexpr as ne
 import time
+import cv2
 import matplotlib.pyplot as plt
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
@@ -12,6 +13,7 @@ from PyQt5.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsTextItem
 )
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QRectF
+from PyQt5.QtGui import QColor
 
 class CircularProgressBar(QWidget):
     def __init__(self, parent=None):
@@ -40,7 +42,7 @@ class CircularProgressBar(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
 
         # Draw background circle
-        pen_bg = QPen(Qt.blue, 6, Qt.SolidLine)
+        pen_bg = QPen(QColor("#9EBCD6"), 6, Qt.SolidLine)
         painter.setPen(pen_bg)
         painter.drawEllipse(15, 15, 70, 70)
 
@@ -51,9 +53,9 @@ class CircularProgressBar(QWidget):
 
         # Create a gradient for the rotating arc
         gradient = QConicalGradient(rect.center(), self.angle_offset)
-        gradient.setColorAt(0.0, Qt.blue)
-        gradient.setColorAt(0.5, Qt.cyan)
-        gradient.setColorAt(1.0, Qt.blue)
+        gradient.setColorAt(0.0, QColor("#5D8EB9"))
+        gradient.setColorAt(0.5, QColor("#1969AE"))  # cyan
+        gradient.setColorAt(1.0, QColor("#5D8EB9"))
 
         pen_progress = QPen()
         pen_progress.setWidth(6)
@@ -93,6 +95,7 @@ class HologramReconstructionApp(QWidget):
     def __init__(self):
         super().__init__()
         self.hologram = None
+        self.current_reconstructed_image = None  # Store current reconstructed image for saving
         self.Nr0 = 0
         self.Nc0 = 0
         self.dx = 6.8e-6  # sensor pixel size (m)
@@ -101,6 +104,7 @@ class HologramReconstructionApp(QWidget):
         self.k_squared = self.k**2
         self.four_pi_squared = 4 * np.pi**2
         self.p = np.pi
+        self.theta = 1  # Angle in radians, can be adjusted
 
         self.input_array = None
         self.output_array = None
@@ -138,23 +142,23 @@ class HologramReconstructionApp(QWidget):
         control_layout = QHBoxLayout()
         reconstruction_params_layout = QVBoxLayout()
 
-        # --- Hologram Loading & Reconstruction Button Row ---
+        # --- Hologram Loading & Dimension Label Row ---
         button_layout = QHBoxLayout()
         load_button = QPushButton('Load Hologram Image')
         load_button.clicked.connect(self.load_hologram)
         load_button.setStyleSheet("background-color: #1E88E5; color: white; height: 40px; font-size: 14px; border-radius: 8px;font-weight: bold;")
 
-        reconstruct_button = QPushButton('Reconstruct Hologram')
-        reconstruct_button.clicked.connect(self.reconstruct_hologram)
-        reconstruct_button.setStyleSheet("background-color: #1E88E5; color: white; height: 40px; font-size: 14px; border-radius: 8px; font-weight: bold;")
+        self.dimension_label = QLabel('Hologram Dimension: N/A')
+        self.dimension_label.setStyleSheet("font-size: 14px;font-weight: bold;")
+        self.dimension_label.setAlignment(Qt.AlignCenter)
         button_layout.addSpacing(50)
         button_layout.addWidget(load_button)
         button_layout.addSpacing(100)  # Add horizontal spacing between the buttons
-        button_layout.addWidget(reconstruct_button)
+        button_layout.addWidget(self.dimension_label)
         button_layout.addSpacing(50)
-        reconstruction_params_layout.addSpacing(20)
+        reconstruction_params_layout.addSpacing(10)
         reconstruction_params_layout.addLayout(button_layout)
-        reconstruction_params_layout.addSpacing(20)
+        reconstruction_params_layout.addSpacing(10)
 
         # --- Distance controls (existing code) ---
         dist_layout = QHBoxLayout()
@@ -168,7 +172,7 @@ class HologramReconstructionApp(QWidget):
         self.dist_input.textChanged.connect(self.update_slider_from_text)
         self.dist_input.setMinimumHeight(40)
         self.dist_input.setMaximumHeight(40)
-        self.dist_input.setStyleSheet("font-size: 14px;")
+        self.dist_input.setStyleSheet("font-size: 14px; border: 2px solid #ccc; border-radius: 8px; padding: 5px;")
         self.dist_slider = QSlider(Qt.Horizontal)
         self.dist_slider.setMinimum(-1000)
         self.dist_slider.setMaximum(1000) # Max 5 meters, scaled
@@ -207,20 +211,85 @@ class HologramReconstructionApp(QWidget):
         dist_layout.addSpacing(60)
         dist_layout.addWidget(self.dist_slider, 8)  # QSlider gets 60% of the space
         reconstruction_params_layout.addLayout(dist_layout)
-        reconstruction_params_layout.addSpacing(20)
+        reconstruction_params_layout.addSpacing(10)
+
+        # --- Parameters controls (Wavelength, Angle, Lens Focal Length) ---
+        params_layout = QHBoxLayout()
+        
+        # Wavelength controls
+        wavelength_label = QLabel('Wavelength (nm):')
+        wavelength_label.setMinimumHeight(40)
+        wavelength_label.setMaximumHeight(40)
+        wavelength_label.setStyleSheet("font-size: 14px; ")
+        self.wavelength_input = QLineEdit(self)
+        self.wavelength_input.setValidator(QDoubleValidator())
+        self.wavelength_input.setText("632")  # Default value 632 nm
+        self.wavelength_input.textChanged.connect(self.update_wavelength)
+        self.wavelength_input.setMinimumHeight(40)
+        self.wavelength_input.setMaximumHeight(40)
+        self.wavelength_input.setStyleSheet("font-size: 14px; border: 2px solid #ccc; border-radius: 8px; padding: 5px;")
+        params_layout.addWidget(wavelength_label)
+        params_layout.addWidget(self.wavelength_input)
+        params_layout.addSpacing(10)
+
+        # Angle controls
+        angle_label = QLabel('Angle(deg.):')
+        angle_label.setMinimumHeight(40)
+        angle_label.setMaximumHeight(40)
+        angle_label.setStyleSheet("font-size: 14px; ")
+        self.angle_input = QLineEdit(self)
+        self.angle_input.setValidator(QDoubleValidator())
+        self.angle_input.setText("1")  # Default value
+        self.angle_input.textChanged.connect(self.update_angle)
+        self.angle_input.setMinimumHeight(40)
+        self.angle_input.setMaximumHeight(40)
+        self.angle_input.setStyleSheet("font-size: 14px; border: 2px solid #ccc; border-radius: 8px; padding: 5px;")
+        params_layout.addWidget(angle_label)
+        params_layout.addWidget(self.angle_input)
+        params_layout.addSpacing(10)
+
+        # Lens focal length controls
+        focal_length_label = QLabel('Lens Focal Length (cm):')
+        focal_length_label.setMinimumHeight(40)
+        focal_length_label.setMaximumHeight(40)
+        focal_length_label.setStyleSheet("font-size: 14px; ")
+        self.focal_length_input = QLineEdit(self)
+        self.focal_length_input.setValidator(QDoubleValidator())
+        self.focal_length_input.setText("30")  # Default value
+        self.focal_length_input.setMinimumHeight(40)
+        self.focal_length_input.setMaximumHeight(40)
+        self.focal_length_input.setStyleSheet("font-size: 14px; border: 2px solid #ccc; border-radius: 8px; padding: 5px;")
+        params_layout.addWidget(focal_length_label)
+        params_layout.addWidget(self.focal_length_input)
+
+        reconstruction_params_layout.addLayout(params_layout)
+        reconstruction_params_layout.addSpacing(10)
+        
         control_layout.addLayout(reconstruction_params_layout)
 
-        # --- Time Labels ---
+        # --- Time Labels and Action Buttons ---
         time_labels_layout = QHBoxLayout()
         self.time_label1 = QLabel('Reconstruction Time: N/A')
         self.time_label1.setStyleSheet("font-size: 14px;")
-        self.time_label2 = QLabel('Propagation Time: N/A')
-        self.time_label2.setStyleSheet("font-size: 14px;")
-        self.dimension_label = QLabel('Hologram Dimension: N/A')
-        self.dimension_label.setStyleSheet("font-size: 14px;")
+        self.time_label1.setAlignment(Qt.AlignCenter)
+        
+        # Reconstruct button
+        reconstruct_button = QPushButton('Reconstruct Hologram')
+        reconstruct_button.clicked.connect(self.reconstruct_hologram)
+        reconstruct_button.setStyleSheet("background-color: #1E88E5; color: white; height: 40px; font-size: 14px; border-radius: 8px; font-weight: bold;")
+        
+        # Save button
+        save_button = QPushButton('Save Reconstructed Image')
+        save_button.clicked.connect(self.save_reconstructed_image)
+        save_button.setStyleSheet("background-color: #4CAF50; color: white; height: 40px; font-size: 14px; border-radius: 8px; font-weight: bold;")
+        
+        time_labels_layout.addSpacing(30)
         time_labels_layout.addWidget(self.time_label1)
-        time_labels_layout.addWidget(self.time_label2)
-        time_labels_layout.addWidget(self.dimension_label)
+        time_labels_layout.addSpacing(50)
+        time_labels_layout.addWidget(reconstruct_button)
+        time_labels_layout.addSpacing(20)
+        time_labels_layout.addWidget(save_button)
+        time_labels_layout.addSpacing(30)
         
         reconstruction_params_layout.addSpacing(20)
         reconstruction_params_layout.addLayout(time_labels_layout)
@@ -293,6 +362,7 @@ class HologramReconstructionApp(QWidget):
             self.load_thread = HologramLoadThread(file_path)
             self.load_thread.loading_complete.connect(self.on_hologram_loaded)
             self.load_thread.start()
+            
 
     def show_progress_bar(self):
         # Center the progress bar over the view
@@ -318,6 +388,7 @@ class HologramReconstructionApp(QWidget):
 
         try:
             self.hologram = hologram_data
+            self.original_hologram = hologram_data.copy()  # Store original for angle changes
             self.Nr0, self.Nc0 = np.shape(self.hologram)
             self.dimension_label.setText(f"Hologram Dimension: {self.Nr0}x {self.Nc0}")
 
@@ -325,8 +396,8 @@ class HologramReconstructionApp(QWidget):
             self.precompute_grids()
             
             # Precompute reference wave R after grids are ready
-            self.reference_wave = np.exp(-1j * self.k * np.sin(0.04 * self.x))
-            self.reference_wave = self.reference_wave / np.max(np.abs(self.reference_wave))
+            self.reference_wave = np.exp(-1j * self.k * np.sin(self.theta*np.pi/180 * self.x))
+            # self.reference_wave = self.reference_wave / np.max(np.abs(self.reference_wave))
             
             # Generate preview
             self.plot_hologram_preview()
@@ -447,9 +518,22 @@ class HologramReconstructionApp(QWidget):
         start_total = time.perf_counter()
         if self.hologram is None or self.hologram.size == 0:
             QMessageBox.warning(self, "No Hologram", "Please load a hologram image first.")
-        
-        d2 = float(self.dist_input.text())
-        L, G = self.calculate_asm_parameters(d2)
+            return
+
+        try:
+            d2 = float(self.dist_input.text())
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Please enter a valid reconstruction distance.")
+            return
+
+        # Only recalculate L, G if distance changed
+        if not hasattr(self, '_last_d2') or self._last_d2 != d2 or not hasattr(self, '_last_LG'):
+            L, G = self.calculate_asm_parameters(d2)
+            self._last_LG = (L, G)
+            self._last_d2 = d2
+        else:
+            L, G = self._last_LG
+
         start_time_reconstruction = time.perf_counter()
         ftr = self.angular_spectrum_method(self.hologram, G)
         end_time_reconstruction = time.perf_counter()
@@ -462,16 +546,16 @@ class HologramReconstructionApp(QWidget):
 
             # Convert the reconstructed intensity to a displayable 8-bit grayscale image
             intensity = np.abs(ftr)**2
-            
+
             min_val = np.min(intensity)
             max_val = np.max(intensity)
+
             
-            if max_val - min_val > 1e-9:
-                display_image = (intensity - min_val) / (max_val - min_val) * 255
-            else:
-                display_image = np.zeros_like(intensity)
-            
+            display_image = (intensity - min_val) / (max_val - min_val) * 255
             display_image = display_image.astype(np.uint8)
+
+            # Store the current reconstructed image for saving
+            self.current_reconstructed_image = display_image.copy()
 
             h, w = display_image.shape
             q_image = QImage(display_image.data, w, h, w, QImage.Format_Grayscale8)
@@ -484,7 +568,6 @@ class HologramReconstructionApp(QWidget):
             self.view.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
             self.view.setRenderHint(QPainter.SmoothPixmapTransform)
 
-        self.time_label2.setText(f"Propagation Time: {end_time_reconstruction - start_time_reconstruction:.4f} s")
         end_total = time.perf_counter()
         self.time_label1.setText(f"Total Reconstruction Time: {end_total - start_total:.4f} s")
 
@@ -504,6 +587,72 @@ class HologramReconstructionApp(QWidget):
     def update_text_from_slider(self):
         value = self.dist_slider.value() / 1000.0
         self.dist_input.setText(f"{value:.3f}")
+
+    def update_wavelength(self):
+        try:
+            wavelength_nm = float(self.wavelength_input.text())
+            self.wavelength = wavelength_nm * 1e-9  # Convert nm to m
+            # Update k and k_squared based on new wavelength
+            self.k = 2 * np.pi / self.wavelength
+            self.k_squared = self.k**2
+            # Recalculate reference wave and update hologram if loaded
+            if self.hologram is not None and hasattr(self, 'x'):
+                self.update_reference_wave()
+        except ValueError:
+            pass
+
+    def update_angle(self):
+        try:
+            angle_deg = float(self.angle_input.text())
+            self.theta = angle_deg  # Store angle in degrees for use in reference wave calculation
+            # Recalculate reference wave and update hologram if loaded
+            if self.hologram is not None and hasattr(self, 'x'):
+                self.update_reference_wave()
+        except ValueError:
+            pass
+
+    def update_reference_wave(self):
+        """Recalculate reference wave and update hologram with new angle"""
+        if self.hologram is not None and hasattr(self, 'x'):
+            # Recalculate reference wave with new angle
+            self.reference_wave = np.exp(-1j * self.k * np.sin(self.theta * np.pi / 180 * self.x))
+            self.reference_wave = self.reference_wave / np.max(np.abs(self.reference_wave))
+            
+            # Reapply reference wave to original hologram data
+            # We need to store the original hologram without mean subtraction and reference wave
+            if hasattr(self, 'original_hologram'):
+                self.hologram = self.original_hologram - np.mean(self.original_hologram)
+                self.hologram = self.hologram * self.reference_wave
+                
+                # Trigger reconstruction if distance slider is connected
+                self.reconstruct_hologram()
+
+    def save_reconstructed_image(self):
+        """Save the current reconstructed image to a file."""
+        if self.current_reconstructed_image is None:
+            QMessageBox.warning(self, "No Image", "No reconstructed image available to save.\nPlease reconstruct a hologram first.")
+            return
+        
+        # Open file dialog to choose save location
+        options = QFileDialog.Options()
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, 
+            "Save Reconstructed Image", 
+            "",
+            "PNG Files (*.png);;JPEG Files (*.jpg);;BMP Files (*.bmp);;TIFF Files (*.tiff);;All Files (*)", 
+            options=options
+        )
+        
+        if file_path:
+            try:
+                # Save the image using OpenCV
+                success = cv2.imwrite(file_path, self.current_reconstructed_image)
+                if success:
+                    QMessageBox.information(self, "Success", f"Reconstructed image saved successfully to:\n{file_path}")
+                else:
+                    QMessageBox.critical(self, "Error", "Failed to save the image. Please check the file path and try again.")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"An error occurred while saving the image:\n{str(e)}")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

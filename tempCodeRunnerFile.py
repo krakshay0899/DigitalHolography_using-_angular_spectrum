@@ -1,6 +1,2 @@
-ruction at distance = {d2:.3f} m")
-        self.ax.axis('off')
-        self.canvas.draw()
-        self.ax.set_title(f"Reconstruction at d = {d2:.3f} m")
-        self.ax.axis('off')
-        self.canvas.draw()
+
+u2 = (u2 - np.min(u2)) / (np.max(u2) - np.min(u2))  # Normalize img2 to [0, 1]
